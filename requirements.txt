@@ -1,0 +1,8 @@
+Flask
+requests
+python-dotenv
+Pillow
+numpy
+opencv-python
+pytesseract
+gunicorn
