@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import json
 import traceback
 
+pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'  # Tesseractのパスを指定（環境に応じて変更）
+
 # --- OCRモジュールのインポートとフォールバック ---
 try:
     # ユーザー提供の実際のモジュールをインポート試行
