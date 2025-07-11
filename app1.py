@@ -4,9 +4,9 @@ import requests
 from dotenv import load_dotenv
 import json
 import traceback
-# pytesseractライブラリをインポート
 import pytesseract
 
+pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'  # Tesseractのパスを指定（環境に応じて変更）
 
 # --- OCRモジュールのインポートとフォールバック ---
 try:
@@ -14,6 +14,7 @@ try:
     from ocr_module import ocr_from_bytes, robust_parse_pfc, calculate_ratio_from_parsed
     print(">>> Successfully imported 'ocr_module'.")
 except Exception as e:
+    # 【修正点】ImportErrorだけでなく、あらゆる例外を捕捉してフォールバックする
     print(f">>> Could not import 'ocr_module' (Error: {repr(e)}). Falling back to dummy functions.")
     traceback.print_exc()
     
@@ -41,6 +42,7 @@ load_dotenv()
 app = Flask(__name__)
 VERIFY_TOKEN      = os.getenv('VERIFY_TOKEN')
 PAGE_ACCESS_TOKEN = os.getenv('PAGE_ACCESS_TOKEN')
+# APIバージョンを最新に指定
 GRAPH_API_URL     = 'https://graph.facebook.com/v20.0'
 
 @app.route('/webhook', methods=['GET'])
@@ -81,7 +83,6 @@ def process_image_attachments(attachments, sender_id):
             img_response.raise_for_status()
             img_bytes = img_response.content
 
-            # BuildpackによってTesseractへのパスが自動で通る
             text = ocr_from_bytes(img_bytes)
             parsed = robust_parse_pfc(text)
             ratio = calculate_ratio_from_parsed(parsed)
@@ -158,4 +159,15 @@ def webhook():
     return 'OK', 200
 
 if __name__ == '__main__':
+    # アプリ起動時に環境変数が読み込まれているか確認
+    if not PAGE_ACCESS_TOKEN:
+        print("FATAL ERROR: PAGE_ACCESS_TOKEN is not set. Please check your .env file.")
+    else:
+        print(">>> PAGE_ACCESS_TOKEN loaded successfully.")
+    
+    if not VERIFY_TOKEN:
+        print("FATAL ERROR: VERIFY_TOKEN is not set. Please check your .env file.")
+    else:
+        print(">>> VERIFY_TOKEN loaded successfully.")
+
     app.run(host='0.0.0.0', port=os.getenv('PORT', 5000))
