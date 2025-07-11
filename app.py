@@ -4,6 +4,7 @@ import requests
 from dotenv import load_dotenv
 import json
 import traceback
+import pytesseract
 
 pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'  # Tesseractのパスを指定（環境に応じて変更）
 
