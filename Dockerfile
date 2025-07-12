@@ -22,5 +22,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 6. このコンテナが起動したときに実行するコマンド
-# gunicornを使って、app.pyの中のappという名前のFlaskアプリを起動します。
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "app:app"]
+# タイムアウトを120秒に延長して、重いOCR処理に対応します。
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--timeout", "120", "app:app"]
