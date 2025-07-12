@@ -16,25 +16,6 @@ try:
 except Exception as e:
     print(f">>> Could not import 'ocr_module' (Error: {repr(e)}). Falling back to dummy functions.")
     traceback.print_exc()
-    
-    # --- ocr_moduleのダミー実装 ---
-    def ocr_from_bytes(img_bytes):
-        print(">>> (Dummy) OCR processing...")
-        return "たんぱく質 20g\n脂質 15g\n炭水化物 50g"
-
-    def robust_parse_pfc(text):
-        print(">>> (Dummy) Parsing PFC...")
-        return {'P': 20, 'F': 15, 'C': 50}
-
-    def calculate_ratio_from_parsed(parsed):
-        print(">>> (Dummy) Calculating ratio...")
-        total_calories = parsed['P'] * 4 + parsed['F'] * 9 + parsed['C'] * 4
-        if total_calories == 0: return {'P': 0, 'F': 0, 'C': 0}
-        return {
-            'P': (parsed['P'] * 4 / total_calories) * 100,
-            'F': (parsed['F'] * 9 / total_calories) * 100,
-            'C': (parsed['C'] * 4 / total_calories) * 100,
-        }
 # --- フォールバックここまで ---
 
 load_dotenv()
