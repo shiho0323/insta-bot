@@ -1,77 +1,90 @@
-from io import BytesIO
-from PIL import Image
+import re
 import numpy as np
 import cv2
 import pytesseract
 
 def ocr_from_bytes(img_bytes):
-    # PIL→OpenCV 変換はそのまま
-    pil = Image.open(BytesIO(img_bytes)).convert('RGB')
-    img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    """
+    画像バイトデータからOCRでテキストを抽出する。
+    画像の前処理もここで行う。
+    """
+    # バイトデータをnumpy配列に変換
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    # numpy配列を画像としてデコード
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    # 前処理
+    # 画像の前処理（グレースケール化、二値化）はOCRの精度向上に有効
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5,5), 0)
-    _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # 適応的しきい値処理など、他の前処理を試すのも良い
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # ★ここにカスタム設定を定義して…
-    custom_config = (
-        '--oem 3 '              # OCR Engine Mode  
-        '--psm 6 '              # Page Segmentation Mode  
-        '-c tessedit_char_whitelist=0123456789./gcalPFC%'  
-    )
-
-    # ★そして image_to_string に渡す
-    text = pytesseract.image_to_string(
-        th,
-        lang='jpn+eng',
-        config=custom_config
-    )
+    # OCR実行
+    # 日本語と英語の言語パックを使用
+    text = pytesseract.image_to_string(th, lang='jpn+eng')
+    print(f"--- OCR Result ---\n{text}\n--------------------")
     return text
 
-def calculate_ratio_from_parsed(parsed):
-    kc_p = parsed['P']['current'] * 4
-    kc_f = parsed['F']['current'] * 9
-    kc_c = parsed['C']['current'] * 4
-    total = kc_p + kc_f + kc_c
-    return {
-        'P': kc_p / total * 100,
-        'F': kc_f / total * 100,
-        'C': kc_c / total * 100,
+def robust_parse_pfc(ocr_text):
+    """
+    OCRテキストからPFCの値を頑健に抽出する。
+    正規表現を使い、一般的なOCRエラーに対応する。
+    """
+    pfc = {'P': 0.0, 'F': 0.0, 'C': 0.0}
+    
+    # 検索しやすいように、テキストから空白や改行を一部整理
+    lines = ocr_text.strip().split('\n')
+    full_text = ' '.join(lines)
+
+    # キーワードと、それに続く数値を抽出するための正規表現パターン
+    # 「たんぱく質」の後にコロンやスペースを挟んで「20.5」のような数字があるパターンを捕捉
+    patterns = {
+        'P': r'(たんぱく質|タンパク質|protein|p)\s*[:：]?\s*([\d.]+)',
+        'F': r'(脂質|ししつ|fat|f)\s*[:：]?\s*([\d.]+)',
+        'C': r'(炭水化物|たんすいかぶつ|carbo|c)\s*[:：]?\s*([\d.]+)'
     }
 
-import re
+    for key, pattern in patterns.items():
+        # パターンにマッチするものを探す (大文字・小文字を無視)
+        match = re.search(pattern, full_text, re.IGNORECASE)
+        if match:
+            try:
+                # 見つかった数値部分を浮動小数点数に変換
+                value = float(match.group(2))
+                pfc[key] = value
+            except (ValueError, IndexError):
+                # 変換に失敗した場合はスキップ
+                print(f"Could not parse value for {key} from match: {match.groups()}")
+                continue
+    
+    print(f"--- Parsed PFC ---\nP: {pfc['P']}, F: {pfc['F']}, C: {pfc['C']}\n------------------")
+    
+    # 3つの栄養素がすべて0の場合は、解析失敗とみなす
+    if pfc['P'] == 0.0 and pfc['F'] == 0.0 and pfc['C'] == 0.0:
+        raise ValueError("PFCの値をテキストから抽出できませんでした。")
+        
+    return pfc
 
-def robust_parse_pfc(text):
-    # 1) 数字／数字 のペアを含む行だけ抽出 （g の有無は問わない）
-    lines = [
-        ln.strip()
-        for ln in text.splitlines()
-        if re.search(r'\d+\.\d+\s*[／/]\s*\d+\.\d+', ln)
-    ]
-    if len(lines) < 2:
-        raise ValueError(f"P/F/Cの行が足りません: {lines}")
 
-    # 2) １行目 → P と F
-    def find_pairs(ln):
-        # スラッシュ区切りの float ペアをすべて拾う
-        return re.findall(r'(\d+\.\d+)\s*[／/]\s*(\d+\.\d+)', ln)
+def calculate_ratio_from_parsed(parsed_pfc):
+    """
+    解析済みのPFC辞書からカロリーベースのPFC比率を計算する。
+    """
+    # 各栄養素のグラムあたりのカロリー
+    P_CAL_PER_G = 4
+    F_CAL_PER_G = 9
+    C_CAL_PER_G = 4
 
-    p_f_pairs = find_pairs(lines[0])
-    if len(p_f_pairs) < 2:
-        raise ValueError(f"P/F ペアが見つかりません: {lines[0]}")
-    p_cur, p_tgt = map(float, p_f_pairs[0])
-    f_cur, f_tgt = map(float, p_f_pairs[1])
+    p_cal = parsed_pfc.get('P', 0.0) * P_CAL_PER_G
+    f_cal = parsed_pfc.get('F', 0.0) * F_CAL_PER_G
+    c_cal = parsed_pfc.get('C', 0.0) * C_CAL_PER_G
 
-    # 3) ２行目 → C と Sugar（２ペアあるはずだが、Cだけ見ればOK）
-    c_pairs = find_pairs(lines[1])
-    if len(c_pairs) < 1:
-        raise ValueError(f"Cペアが見つかりません: {lines[1]}")
-    c_cur, c_tgt = map(float, c_pairs[0])
+    total_cal = p_cal + f_cal + c_cal
+
+    if total_cal == 0:
+        return {'P': 0.0, 'F': 0.0, 'C': 0.0}
 
     return {
-        'P': {'current': p_cur, 'target': p_tgt},
-        'F': {'current': f_cur, 'target': f_tgt},
-        'C': {'current': c_cur, 'target': c_tgt},
+        'P': (p_cal / total_cal) * 100,
+        'F': (f_cal / total_cal) * 100,
+        'C': (c_cal / total_cal) * 100,
     }
-
