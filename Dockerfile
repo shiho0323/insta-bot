@@ -3,10 +3,10 @@ FROM python:3.11-slim
 
 # 2. 必要なシステムライブラリをインストール
 # Tesseractと、OpenCVが必要とするグラフィックライブラリ(libgl1)をインストールします。
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-jpn \
-    libgl1-mesa-glx \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. プログラムを置くためのフォルダを作成
