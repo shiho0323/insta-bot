@@ -17,7 +17,7 @@ if os.path.exists('/usr/bin/tesseract'):
 # 次に、実際のモジュールのインポートを試みます。
 # 成功すれば、上のダミー関数が実際の関数で上書きされます。
 
-from ocr_module import ocr_from_bytes
+from ocr_module import ocr_from_bytes, robust_parse_pfc, calculate_ratio_from_parsed 
 #print(">>> Successfully imported 'ocr_module'.", flush=True)
 
 # --- ここからFlaskアプリ本体 ---
@@ -66,7 +66,15 @@ def process_image_attachments(attachments, sender_id):
             img_response.raise_for_status()
             img_bytes = img_response.content
 
-            ratio = ocr_from_bytes(img_bytes)
+            # 1. 画像からテキストを抽出
+            extracted_text = ocr_from_bytes(img_bytes)
+            print(f">>> OCR Result: \n{extracted_text}", flush=True) # 抽出結果をログに出力
+
+            # 2. テキストを解析してPFCの数値を取得
+            parsed_data = robust_parse_pfc(extracted_text)
+
+            # 3. 解析データからPFC比率を計算
+            ratio = calculate_ratio_from_parsed(parsed_data)
 
             reply_text = f"PFCバランスを計算しました！\nP: {ratio['P']:.1f}%\nF: {ratio['F']:.1f}%\nC: {ratio['C']:.1f}%"
             send_message(sender_id, reply_text)
