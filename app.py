@@ -17,7 +17,7 @@ if os.path.exists('/usr/bin/tesseract'):
 # 次に、実際のモジュールのインポートを試みます。
 # 成功すれば、上のダミー関数が実際の関数で上書きされます。
 
-from ocr_module import ocr_from_bytes
+from ocr_module import ocr_from_bytes, robust_parse_pfc, calculate_ratio_from_parsed
 #print(">>> Successfully imported 'ocr_module'.", flush=True)
 
 # --- ここからFlaskアプリ本体 ---
