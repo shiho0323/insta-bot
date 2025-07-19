@@ -20,49 +20,75 @@ def _preprocess(img: np.ndarray) -> np.ndarray:
     return closed
 
 def _perform_ocr(img: np.ndarray) -> str:
-    """文字認識。数字と小数点のみを許可して精度向上を図る"""
-    config = '--psm 6 -c tessedit_char_whitelist=0123456789.'
-    return pytesseract.image_to_string(img, lang='eng', config=config)
+    """文字認識。日本語と英語に対応し、様々な形式の栄養成分表示に対応"""
+    # ★言語に 'jpn' を追加し、認識できる文字種を増やす
+    config = '--psm 6' # tessedit_char_whitelist は削除し、日本語を認識できるようにする
+    text = pytesseract.image_to_string(img, lang='jpn+eng', config=config)
+    
+    # 【デバッグ用】どんなテキストが認識されたかログに出力したい場合は、以下の行のコメントを解除してください
+    # print(f"--- OCR Result ---\n{text}\n--------------------", flush=True)
+    
+    return text
 
-def _parse_pfc(text: str) -> dict:
-    """P, F, C の数値を正規表現で抽出"""
-    parsed = {}
-    m = re.search(r'[Pp]:?\s*([0-9]+(?:\.[0-9]+)?)', text)
-    if m: parsed['P'] = float(m.group(1))
-    m = re.search(r'[Ff]:?\s*([0-9]+(?:\.[0-9]+)?)', text)
-    if m: parsed['F'] = float(m.group(1))
-    m = re.search(r'[Cc]:?\s*([0-9]+(?:\.[0-9]+)?)', text)
-    if m: parsed['C'] = float(m.group(1))
-    return parsed
+def _robust_parse_pfc(text: str) -> dict:
+    """
+    【強化版】P, F, C の数値を様々なキーワードから頑健に抽出する。
+    「たんぱく質」「脂質」「炭水化物」などの日本語キーワードに対応。
+    """
+    pfc = {'P': 0.0, 'F': 0.0, 'C': 0.0}
+    
+    # 検索しやすいように、テキストから改行や空白を整理
+    flat_text = ' '.join(text.split())
+
+    # キーワードと、その後に現れる最初の数値を抽出するための正規表現パターン
+    # 'g'や'グラム'などの単位の有無、コロンやスペースのバリエーションに対応
+    patterns = {
+        'P': r'(たんぱく質|タンパク質|protein)\s*:?\s*([\d.]+)',
+        'F': r'(脂質|ししつ|fat)\s*:?\s*([\d.]+)',
+        'C': r'(炭水化物|たんすいかぶつ|carbohydrate)\s*:?\s*([\d.]+)'
+    }
+
+    for key, pattern in patterns.items():
+        # パターンにマッチするものを探す (大文字・小文字を無視)
+        match = re.search(pattern, flat_text, re.IGNORECASE)
+        if match:
+            try:
+                # 見つかった数値部分(group(2))を浮動小数点数に変換
+                value_str = match.group(2)
+                pfc[key] = float(value_str)
+            except (ValueError, IndexError):
+                continue # 変換に失敗した場合はスキップ
+                
+    # 【デバッグ用】パース結果を確認したい場合は以下の行のコメントを解除
+    # print(f"--- Parsed PFC ---\nP: {pfc['P']}, F: {pfc['F']}, C: {pfc['C']}\n------------------", flush=True)
+        
+    return pfc
 
 def ocr_from_bytes(img_bytes: bytes) -> dict:
     """
     画像バイト列→OCR→P,F,C比率を返却
-    戻り値例：{'P': 25.0, 'F': 50.0, 'C': 25.0}
     """
-    # ① PIL読み込みを試す
     try:
         pil = Image.open(BytesIO(img_bytes)).convert('RGB')
         img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
     except Exception:
-        # ② フォールバックでOpenCVデコード
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError("画像デコードに失敗しました")
 
-    # ③ 縦解像度が小さければ拡大
+    # 縦解像度が小さければ拡大
     h = img.shape[0]
     if h < 800:
         scale = 800.0 / h
         img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
 
-    # ④ 前処理→OCR→パース
+    # 前処理→OCR→パース
     proc = _preprocess(img)
     raw = _perform_ocr(proc)
-    parsed = _parse_pfc(raw)
+    parsed = _robust_parse_pfc(raw) # ★新しい堅牢なパース関数を呼び出す
 
-    # ⑤ カロリー換算＆比率計算
+    # カロリー換算＆比率計算
     p_cal = parsed.get('P', 0.0) * P_CAL_PER_G
     f_cal = parsed.get('F', 0.0) * F_CAL_PER_G
     c_cal = parsed.get('C', 0.0) * C_CAL_PER_G
