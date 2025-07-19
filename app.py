@@ -14,34 +14,11 @@ if os.path.exists('/usr/bin/tesseract'):
 
 
 # --- OCR関数の定義（安全なフォールバック方式） ---
-
-# まず、ダミーの関数を定義しておきます。
-def ocr_from_bytes(img_bytes):
-    print(">>> (Dummy) OCR processing...", flush=True)
-    return "たんぱく質 20g\n脂質 15g\n炭水化物 50g"
-
-def robust_parse_pfc(text):
-    print(">>> (Dummy) Parsing PFC...", flush=True)
-    return {'P': 20, 'F': 15, 'C': 50}
-
-def calculate_ratio_from_parsed(parsed):
-    print(">>> (Dummy) Calculating ratio...", flush=True)
-    total_calories = parsed['P'] * 4 + parsed['F'] * 9 + parsed['C'] * 4
-    if total_calories == 0: return {'P': 0, 'F': 0, 'C': 0}
-    return {
-        'P': (parsed['P'] * 4 / total_calories) * 100,
-        'F': (parsed['F'] * 9 / total_calories) * 100,
-        'C': (parsed['C'] * 4 / total_calories) * 100,
-    }
-
 # 次に、実際のモジュールのインポートを試みます。
 # 成功すれば、上のダミー関数が実際の関数で上書きされます。
-try:
-    from ocr_module import ocr_from_bytes, robust_parse_pfc, calculate_ratio_from_parsed
-    print(">>> Successfully imported 'ocr_module'.", flush=True)
-except ImportError as e:
-    print(f">>> Could not import 'ocr_module' (Error: {repr(e)}). Using dummy functions.", flush=True)
-    # インポートに失敗しても、既にダミー関数が定義されているのでプログラムは止まりません。
+
+from ocr_module import ocr_from_bytes, robust_parse_pfc, calculate_ratio_from_parsed
+#print(">>> Successfully imported 'ocr_module'.", flush=True)
 
 # --- ここからFlaskアプリ本体 ---
 
