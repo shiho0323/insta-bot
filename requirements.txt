@@ -6,3 +6,6 @@ numpy
 opencv-python
 pytesseract
 gunicorn
+easyocr
+torch
+torchvision
