@@ -17,7 +17,7 @@ if os.path.exists('/usr/bin/tesseract'):
 # 次に、実際のモジュールのインポートを試みます。
 # 成功すれば、上のダミー関数が実際の関数で上書きされます。
 
-from ocr_module import ocr_from_bytes, robust_parse_pfc, calculate_ratio_from_parsed 
+from ocr_module import calculate_pfc_from_image_final 
 #print(">>> Successfully imported 'ocr_module'.", flush=True)
 
 # --- ここからFlaskアプリ本体 ---
@@ -39,6 +39,8 @@ def verify():
     print(">>> Webhook verification failed.", flush=True)
     return 'Forbidden', 403
 
+# ... (app.pyの他の部分はそのまま) ...
+
 def process_image_attachments(attachments, sender_id):
     for att in attachments:
         try:
@@ -48,35 +50,31 @@ def process_image_attachments(attachments, sender_id):
             payload = att.get('payload', {})
             media_url = payload.get('url')
 
-            if not media_url and 'id' in payload:
-                media_id = payload['id']
-                print(f">>> Resolving media_id {media_id} to a URL...", flush=True)
-                graph_api_url = f"{GRAPH_API_URL}/{media_id}"
-                params = {'fields': 'media_url', 'access_token': PAGE_ACCESS_TOKEN}
-                res = requests.get(graph_api_url, params=params)
-                res.raise_for_status()
-                media_url = res.json().get('media_url')
-
             if not media_url:
-                print(">>> No media URL found or resolved, skipping attachment.", flush=True)
+                print(">>> No media URL found, skipping attachment.", flush=True)
                 continue
 
             print(f">>> Downloading image from: {media_url}", flush=True)
             img_response = requests.get(media_url)
             img_response.raise_for_status()
             img_bytes = img_response.content
+           
+            # OCRモジュールを呼び出す
+            pfc_result = calculate_pfc_from_image_final(img_bytes)
 
-            # 1. 画像からテキストを抽出
-            extracted_text = ocr_from_bytes(img_bytes)
-            print(f">>> OCR Result: \n{extracted_text}", flush=True) # 抽出結果をログに出力
+            # ★★★【修正点】★★★
+            # OCRが成功したかどうかをチェック
+            if pfc_result:
+                reply_text = (
+                    f"PFCバランスを計算しました！\n\n"
+                    f"P (たんぱく質): {pfc_result['P']:.1f}%\n"
+                    f"F (脂質): {pfc_result['F']:.1f}%\n"
+                    f"C (炭水化物): {pfc_result['C']:.1f}%"
+                )
+            else:
+                # OCRが失敗した場合のメッセージ
+                reply_text = "画像を解析できませんでした。\n文字がはっきり写っている画像で再試行してください。"
 
-            # 2. テキストを解析してPFCの数値を取得
-            parsed_data = robust_parse_pfc(extracted_text)
-
-            # 3. 解析データからPFC比率を計算
-            ratio = calculate_ratio_from_parsed(parsed_data)
-
-            reply_text = f"PFCバランスを計算しました！\nP: {ratio['P']:.1f}%\nF: {ratio['F']:.1f}%\nC: {ratio['C']:.1f}%"
             send_message(sender_id, reply_text)
 
         except Exception as e:
@@ -84,7 +82,9 @@ def process_image_attachments(attachments, sender_id):
             print(f"Exception: {repr(e)}", flush=True)
             traceback.print_exc()
             print(f"Problematic Attachment Data: {att}", flush=True)
-            send_message(sender_id, "添付ファイルの処理中にエラーが発生しました。")
+            send_message(sender_id, "添付ファイルの処理中に予期せぬエラーが発生しました。")
+
+# ... (app.pyの他の部分はそのまま) ...
 
 def send_message(recipient_id, text):
     print(f">>> Sending message to {recipient_id}: {text}", flush=True)

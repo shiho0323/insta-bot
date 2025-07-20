@@ -1,77 +1,71 @@
-from io import BytesIO
-from PIL import Image
-import numpy as np
-import cv2
-import pytesseract
-
-def ocr_from_bytes(img_bytes):
-    # PIL→OpenCV 変換はそのまま
-    pil = Image.open(BytesIO(img_bytes)).convert('RGB')
-    img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-
-    # 前処理
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5,5), 0)
-    _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # ★ここにカスタム設定を定義して…
-    custom_config = (
-        '--oem 3 '              # OCR Engine Mode  
-        '--psm 6 '              # Page Segmentation Mode  
-        '-c tessedit_char_whitelist=0123456789./gcalPFC%'  
-    )
-
-    # ★そして image_to_string に渡す
-    text = pytesseract.image_to_string(
-        th,
-        lang='jpn+eng',
-        config=custom_config
-    )
-    return text
-
-def calculate_ratio_from_parsed(parsed):
-    kc_p = parsed['P']['current'] * 4
-    kc_f = parsed['F']['current'] * 9
-    kc_c = parsed['C']['current'] * 4
-    total = kc_p + kc_f + kc_c
-    return {
-        'P': kc_p / total * 100,
-        'F': kc_f / total * 100,
-        'C': kc_c / total * 100,
-    }
-
+import easyocr
 import re
 
-def robust_parse_pfc(text):
-    # 1) 数字／数字 のペアを含む行だけ抽出 （g の有無は問わない）
-    lines = [
-        ln.strip()
-        for ln in text.splitlines()
-        if re.search(r'\d+\.\d+\s*[／/]\s*\d+\.\d+', ln)
-    ]
-    if len(lines) < 2:
-        raise ValueError(f"P/F/Cの行が足りません: {lines}")
+def calculate_pfc_from_image_final(image_data):
+    """
+    【最終完全版】全てのOCRエラーパターンに対応し、画像データ（バイト列）を直接受け取る
+    """
+    try:
+        # 画像データを直接OCRにかける
+        reader = easyocr.Reader(['ja', 'en'])
+        # paragraph=True は、文章として意味のあるまとまりでテキストを連結するオプション
+        # これにより、キーワードと数値が分離しにくくなる効果が期待できる
+        result = reader.readtext(image_data, detail=0, paragraph=True) 
+        full_text = ' '.join(result)
+        
+    except Exception as e:
+        print(f"!!! OCR processing failed: {e}", flush=True)
+        return None
 
-    # 2) １行目 → P と F
-    def find_pairs(ln):
-        # スラッシュ区切りの float ペアをすべて拾う
-        return re.findall(r'(\d+\.\d+)\s*[／/]\s*(\d+\.\d+)', ln)
+    p_gram, f_gram, c_gram = None, None, None
+    keyword_p = r'たんぱく(?:質|貨)'
+    keyword_f = r'脂(?:質|貨)'
+    keyword_c = r'炭水化物'
 
-    p_f_pairs = find_pairs(lines[0])
-    if len(p_f_pairs) < 2:
-        raise ValueError(f"P/F ペアが見つかりません: {lines[0]}")
-    p_cur, p_tgt = map(float, p_f_pairs[0])
-    f_cur, f_tgt = map(float, p_f_pairs[1])
+    # パターン1: 理想的なケース（スラッシュ区切り）
+    pf_match_slash = re.search(f'{keyword_p}\\s*{keyword_f}\\s*(\\d+\\.\\d+)\\s*/\\s*\\d+\\.\\d+[^.\\d]*(\\d+\\.\\d+)', full_text)
+    
+    # パターン2: Pのスラッシュが消えたケース（スペース区切り）
+    pf_match_no_slash = re.search(f'{keyword_p}\\s*{keyword_f}\\s*(\\d+\\.\\d+)\\s+\\d+\\.\\d+[^.\\d]*(\\d+\\.\\d+)', full_text)
 
-    # 3) ２行目 → C と Sugar（２ペアあるはずだが、Cだけ見ればOK）
-    c_pairs = find_pairs(lines[1])
-    if len(c_pairs) < 1:
-        raise ValueError(f"Cペアが見つかりません: {lines[1]}")
-    c_cur, c_tgt = map(float, c_pairs[0])
+    # パターン3: 全ての区切り文字が消えたケース
+    pf_match_no_space = re.search(f'{keyword_p}\\s*{keyword_f}(\\d+\\.\\d+)(\\d+\\.\\d+)(\\d+\\.\\d+)', full_text)
 
-    return {
-        'P': {'current': p_cur, 'target': p_tgt},
-        'F': {'current': f_cur, 'target': f_tgt},
-        'C': {'current': c_cur, 'target': c_tgt},
-    }
+    if pf_match_slash:
+        p_gram = float(pf_match_slash.group(1))
+        f_gram = float(pf_match_slash.group(2))
+    elif pf_match_no_slash:
+        p_gram = float(pf_match_no_slash.group(1))
+        f_gram = float(pf_match_no_slash.group(2))
+    elif pf_match_no_space:
+        p_gram = float(pf_match_no_space.group(1))
+        f_gram = float(pf_match_no_space.group(3))
+    else:
+        # パターン4: その他の予備処理
+        p_match = re.search(f'{keyword_p}\\s*(\\d+\\.\\d+)', full_text)
+        if p_match: p_gram = float(p_match.group(1))
+        
+        f_match = re.search(f'{keyword_f}\\s*(\\d+\\.\\d+)', full_text)
+        if f_match: f_gram = float(f_match.group(1))
 
+    c_match = re.search(f'{keyword_c}\\s*(?:糖質\\s*)?(\\d+\\.\\d+)', full_text)
+    if c_match: c_gram = float(c_match.group(1))
+
+    if p_gram is None or f_gram is None or c_gram is None:
+        print("!!! Could not extract all PFC values from OCR result.", flush=True)
+        print(f"  OCR Text: {''.join(full_text.split())}", flush=True)
+        print(f"  Found values: P={p_gram}, F={f_gram}, C={c_gram}", flush=True)
+        return None
+
+    # PFCバランスを計算
+    p_cal, f_cal, c_cal = p_gram * 4, f_gram * 9, c_gram * 4
+    total_cal = p_cal + f_cal + c_cal
+    if total_cal == 0:
+        return {'P': 0, 'F': 0, 'C': 0}
+
+    p_ratio = (p_cal / total_cal) * 100
+    f_ratio = (f_cal / total_cal) * 100
+    c_ratio = (c_cal / total_cal) * 100
+
+    # app.pyが期待する形式で辞書を返す
+    return {'P': p_ratio, 'F': f_ratio, 'C': c_ratio}
