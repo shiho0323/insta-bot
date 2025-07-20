@@ -2,22 +2,23 @@ import easyocr
 import re
 
 # ★★★【修正点】★★★
-# アプリ起動時に一度だけモデルを読み込むように、関数の外で初期化する
-print("Initializing EasyOCR Reader... This may take a moment on first boot.", flush=True)
-reader = easyocr.Reader(['ja', 'en'])
-print("EasyOCR Reader initialized successfully.", flush=True)
-
+# readerを最初はNoneにしておき、まだ初期化しない
+reader = None
 
 def calculate_pfc_from_image_final(image_data):
     """
-    【最終完全版】EasyOCRの初期化を起動時に行うバージョン
+    【遅延読み込み版】最初の画像処理時に一度だけAIモデルを初期化する
     """
+    global reader
+
+    # ★★★【修正点】★★★
+    # readerがまだ初期化されていない場合（最初の1回目の実行時）にのみ初期化処理を行う
+    if reader is None:
+        print("Initializing EasyOCR Reader for the first time (lazy loading)...", flush=True)
+        reader = easyocr.Reader(['ja', 'en'])
+        print("EasyOCR Reader initialized successfully.", flush=True)
+
     try:
-        # ★★★【修正点】★★★
-        # 初期化済みのreaderをグローバル変数として使用する
-        global reader
-        
-        # paragraph=True は、文章として意味のあるまとまりでテキストを連結するオプション
         result = reader.readtext(image_data, detail=0, paragraph=True) 
         full_text = ' '.join(result)
         
@@ -25,14 +26,11 @@ def calculate_pfc_from_image_final(image_data):
         print(f"!!! OCR processing failed: {e}", flush=True)
         return None
 
-    # --- 正規表現による解析 ---
-    # （この部分のロジックは変更ありません）
+    # --- 正規表現と計算処理（この部分は変更なし） ---
     p_gram, f_gram, c_gram = None, None, None
-
     keyword_p = r'たんぱく(?:質|貨)'
     keyword_f = r'脂(?:質|貨)'
     keyword_c = r'炭水化物'
-
     pf_match_slash = re.search(f'{keyword_p}\\s*{keyword_f}\\s*(\\d+\\.\\d+)\\s*/\\s*\\d+\\.\\d+[^.\\d]*(\\d+\\.\\d+)', full_text)
     pf_match_no_slash = re.search(f'{keyword_p}\\s*{keyword_f}\\s*(\\d+\\.\\d+)\\s+\\d+\\.\\d+[^.\\d]*(\\d+\\.\\d+)', full_text)
     pf_match_no_space = re.search(f'{keyword_p}{keyword_f}(\\d+\\.\\d+)(\\d+\\.\\d+)(\\d+\\.\\d+)', full_text)
@@ -49,7 +47,6 @@ def calculate_pfc_from_image_final(image_data):
     else:
         p_match = re.search(f'{keyword_p}\\s*(\\d+\\.\\d+)', full_text)
         if p_match: p_gram = float(p_match.group(1))
-        
         f_match = re.search(f'{keyword_f}\\s*(\\d+\\.\\d+)', full_text)
         if f_match: f_gram = float(f_match.group(1))
 
@@ -62,7 +59,6 @@ def calculate_pfc_from_image_final(image_data):
         print(f"  Found values: P={p_gram}, F={f_gram}, C={c_gram}", flush=True)
         return None
 
-    # --- 計算処理 ---
     p_cal, f_cal, c_cal = p_gram * 4, f_gram * 9, c_gram * 4
     total_cal = p_cal + f_cal + c_cal
     if total_cal == 0:
