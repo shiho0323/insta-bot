@@ -27,4 +27,4 @@ RUN python download_models.py
 EXPOSE 10000
 
 # 8. コンテナ起動時に実行するコマンド（アプリの起動）
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000"]
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000", "--timeout", "120"]
